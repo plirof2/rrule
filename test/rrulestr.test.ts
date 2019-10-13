@@ -1,16 +1,8 @@
-/* global describe */
-
-var utils = require('./lib/utils')
-var RRule = require('../')
-
-var RRuleSet = RRule.RRuleSet
-var rrulestr = RRule.rrulestr
-
-var parse = utils.parse
-var datetime = utils.datetime
-var datetimeUTC = utils.datetimeUTC
-var testRecurring = utils.testRecurring
-var assertStrType = utils.assertStrType
+import { parse, datetime, datetimeUTC, testRecurring } from './lib/utils'
+import { RRule, RRuleSet, rrulestr, Frequency } from '../src'
+import { expect } from 'chai'
+import { Days } from '../src/rrule';
+import { parseInput } from '../src/rrulestr';
 
 describe('rrulestr', function () {
   // Enable additional toString() / fromString() tests
@@ -27,33 +19,41 @@ describe('rrulestr', function () {
   // NOTE: can take a longer time.
   this.ctx.ALSO_TEST_BEFORE_AFTER_BETWEEN = true
 
-  assertStrType('testStrType',
-    rrulestr(
+  it('parses an rrule', () => {
+    expect(rrulestr(
       'DTSTART:19970902T090000Z\n' +
       'RRULE:FREQ=YEARLY;COUNT=3\n'
-    ),
-    RRule
-  )
+    )).to.be.instanceof(RRule)
+  })
 
-  assertStrType('testStrForceSetType',
-    rrulestr(
+  it('parses an rrule without frequency', () => {
+    const rRuleString = 'DTSTART:19970902T090000Z';
+    const parsedRRuleSet = rrulestr(
+      rRuleString, { forceset: true }
+    ) as RRuleSet;
+    expect(parsedRRuleSet.toString()).to.be.equal(rRuleString);
+
+    const parsedRRule = rrulestr(rRuleString) as RRule;
+    expect(parsedRRule.toString()).to.be.equal(rRuleString);
+  })
+
+  it('parses an rruleset when forceset=true', () => {
+    expect(rrulestr(
       'DTSTART:19970902T090000Z\n' +
       'RRULE:FREQ=YEARLY;COUNT=3\n',
       {
         forceset: true
       }
-    ),
-    RRuleSet
-  )
+    )).to.be.instanceof(RRuleSet)
+  })
 
-  assertStrType('testStrSetType',
-    rrulestr(
+  it('parses an rruleset when there are multiple rrules', () => {
+    expect(rrulestr(
       'DTSTART:19970902T090000Z\n' +
       'RRULE:FREQ=YEARLY;COUNT=2;BYDAY=TU\n' +
       'RRULE:FREQ=YEARLY;COUNT=1;BYDAY=TH\n'
-    ),
-    RRuleSet
-  )
+    )).to.be.instanceof(RRuleSet)
+  })
 
   testRecurring('testStr',
     rrulestr(
@@ -239,7 +239,7 @@ describe('rrulestr', function () {
     ]
   )
 
-  testRecurring.skip('testStrKeywords',
+  testRecurring('testStrKeywords',
     rrulestr(
       'DTSTART:19970902T030000Z\n' +
       'RRULE:FREQ=YEARLY;COUNT=3;INTERVAL=3;' +
@@ -264,4 +264,146 @@ describe('rrulestr', function () {
       datetimeUTC(1998, 12, 31, 9, 0)
     ]
   )
+
+  testRecurring('testStrNWeekDayLarge',
+    rrulestr(
+      'DTSTART:19970902T090000Z\n' +
+      'RRULE:FREQ=YEARLY;COUNT=3;BYDAY=13TU,-13TH\n'
+    ),
+    [
+      datetimeUTC(1997, 10, 2, 9, 0),
+      datetimeUTC(1998, 3, 31, 9, 0),
+      datetimeUTC(1998, 10, 8, 9, 0)
+    ]
+  )
+
+  it('parses without TZID', () => {
+    const rrule = rrulestr(
+      'DTSTART:19970902T090000\nRRULE:FREQ=WEEKLY'
+    )
+
+    expect(rrule.origOptions).to.deep.include({
+      freq: Frequency.WEEKLY,
+      dtstart: new Date(Date.UTC(1997, 8, 2, 9, 0, 0)),
+    })
+  })
+
+  it('parses TZID', () => {
+    const rrule = rrulestr(
+      'DTSTART;TZID=America/New_York:19970902T090000\n' +
+      'RRULE:FREQ=DAILY;UNTIL=19980902T090000'
+    )
+
+    expect(rrule.origOptions).to.deep.include({
+      tzid: 'America/New_York',
+      freq: Frequency.DAILY,
+      dtstart: new Date(Date.UTC(1997, 8, 2, 9, 0, 0)),
+      until: new Date(Date.UTC(1998, 8, 2, 9, 0, 0))
+    })
+  })
+
+  it('parses a DTSTART inside an RRULE', () => {
+    const rrule = rrulestr(
+      'RRULE:UNTIL=19990404T110000Z;DTSTART=19990104T110000Z;FREQ=WEEKLY;BYDAY=TU,WE'
+    )
+
+    expect(rrule.options).to.deep.include({
+      until: new Date(Date.UTC(1999, 3, 4, 11, 0, 0)),
+      dtstart: new Date(Date.UTC(1999, 0, 4, 11, 0, 0)),
+      freq: Frequency.WEEKLY,
+      byweekday: [Days.TU.weekday, Days.WE.weekday]
+    })
+  })
+
+  it('parses a DTSTART with a TZID inside an RRULE', () => {
+    const rrule = rrulestr(
+      'RRULE:UNTIL=19990404T110000Z;DTSTART;TZID=America/New_York:19990104T110000Z;FREQ=WEEKLY;BYDAY=TU,WE'
+    )
+
+    expect(rrule.options).to.deep.include({
+      until: new Date(Date.UTC(1999, 3, 4, 11, 0, 0)),
+      dtstart: new Date(Date.UTC(1999, 0, 4, 11, 0, 0)),
+      freq: Frequency.WEEKLY,
+      tzid: 'America/New_York',
+      byweekday: [Days.TU.weekday, Days.WE.weekday]
+    })
+  })
+
+  it('parses a DTSTART if it is the first param', () => {
+    const rrule = rrulestr(
+      "RRULE:DTSTART;TZID=America/Los_Angeles:20180719T111500;FREQ=DAILY;INTERVAL=1"
+    )
+
+    expect(rrule.options).to.deep.include({
+      dtstart: new Date(Date.UTC(2018, 6, 19, 11, 15, 0)),
+      freq: Frequency.DAILY,
+      interval: 1,
+      tzid: 'America/Los_Angeles'
+    })
+  })
+
+  it('parses an RDATE with no TZID param', () => {
+    const rruleset = rrulestr(
+      "DTSTART:20180719T111500Z\n"+
+      "RRULE:FREQ=DAILY;INTERVAL=1\n" +
+      "RDATE:20180720T111500Z\n"+
+      "EXDATE:20180721T111500Z"
+    ) as RRuleSet
+
+    expect(rruleset.valueOf()).to.deep.equal([
+      "DTSTART:20180719T111500Z",
+      "RRULE:FREQ=DAILY;INTERVAL=1",
+      "RDATE:20180720T111500Z",
+      "EXDATE:20180721T111500Z"
+    ]) 
+  })
+
+  it('parses an RDATE with a TZID param', () => {
+    const rruleset = rrulestr(
+      "DTSTART;TZID=America/Los_Angeles:20180719T111500\n"+
+      "RRULE:FREQ=DAILY;INTERVAL=1\n" +
+      "RDATE;TZID=America/Los_Angeles:20180720T111500\n"+
+      "EXDATE;TZID=America/Los_Angeles:20180721T111500"
+    ) as RRuleSet
+
+    expect(rruleset.valueOf()).to.deep.equal([
+      "DTSTART;TZID=America/Los_Angeles:20180719T111500",
+      "RRULE:FREQ=DAILY;INTERVAL=1",
+      "RDATE;TZID=America/Los_Angeles:20180720T111500",
+      "EXDATE;TZID=America/Los_Angeles:20180721T111500"
+    ]) 
+  })
+})
+
+describe('parseInput', () => {
+  it('parses an input into a structure', () => {
+    const output = parseInput(
+      'DTSTART;TZID=America/New_York:19970902T090000\n' +
+      'RRULE:FREQ=DAILY;UNTIL=19980902T090000;INTERVAL=1\n' +
+      'RDATE:19970902T090000Z\n' +
+      'RDATE:19970904T090000Z\n' +
+      'EXDATE:19970904T090000Z\n' +
+      'EXRULE:FREQ=WEEKLY;INTERVAL=2\n'
+    , {})
+    expect(output).to.deep.include({
+      dtstart: new Date(Date.UTC(1997, 8, 2, 9, 0, 0)),
+      tzid: 'America/New_York',
+      rrulevals: [{
+        interval: 1,
+        freq: Frequency.DAILY,
+        until: new Date(Date.UTC(1998, 8, 2, 9, 0, 0))
+      }],
+      exdatevals: [
+        new Date(Date.UTC(1997, 8, 4, 9, 0, 0)),
+      ],
+      rdatevals: [
+        new Date(Date.UTC(1997, 8, 2, 9, 0, 0)),
+        new Date(Date.UTC(1997, 8, 4, 9, 0, 0)),
+      ],
+      exrulevals: [{
+        interval: 2,
+        freq: Frequency.WEEKLY
+      }]
+    })
+  })
 })

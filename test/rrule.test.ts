@@ -1,12 +1,9 @@
-/* global describe, it */
-
-var assert = require('assert')
-var utils = require('./lib/utils')
-var RRule = require('../')
-
-var parse = utils.parse
-var datetime = utils.datetime
-var testRecurring = utils.testRecurring
+import { parse, datetime, testRecurring, expectedDate } from './lib/utils'
+import { expect } from 'chai'
+import { RRule, rrulestr, Frequency } from '../src/index'
+import { DateTime } from 'luxon'
+import { set as setMockDate, reset as resetMockDate } from 'mockdate'
+import { optionsToString } from '../src/optionstostring';
 
 describe('RRule', function () {
   // Enable additional toString() / fromString() tests
@@ -25,74 +22,51 @@ describe('RRule', function () {
 
   this.ctx.ALSO_TEST_SUBSECOND_PRECISION = true
 
-  var texts = [
-    ['Every day', 'FREQ=DAILY'],
-    ['Every day at 10, 12 and 17', 'FREQ=DAILY;BYHOUR=10,12,17'],
-    ['Every week', 'FREQ=WEEKLY'],
-    ['Every hour', 'FREQ=HOURLY'],
-    ['Every 4 hours', 'INTERVAL=4;FREQ=HOURLY'],
-    ['Every week on Tuesday', 'FREQ=WEEKLY;BYDAY=TU'],
-    ['Every week on Monday, Wednesday', 'FREQ=WEEKLY;BYDAY=MO,WE'],
-    ['Every weekday', 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'],
-    ['Every 2 weeks', 'INTERVAL=2;FREQ=WEEKLY'],
-    ['Every month', 'FREQ=MONTHLY'],
-    ['Every 6 months', 'INTERVAL=6;FREQ=MONTHLY'],
-    ['Every year', 'FREQ=YEARLY'],
-    ['Every month on the 4th', 'FREQ=MONTHLY;BYMONTHDAY=4'],
-    ['Every month on the 4th last', 'FREQ=MONTHLY;BYMONTHDAY=-4'],
-    ['Every month on the 3rd Tuesday', 'FREQ=MONTHLY;BYDAY=+3TU'],
-    ['Every month on the 3rd last Tuesday', 'FREQ=MONTHLY;BYDAY=-3TU'],
-    ['Every month on the last Monday', 'FREQ=MONTHLY;BYDAY=-1MO'],
-    ['Every month on the 2nd last Friday', 'FREQ=MONTHLY;BYDAY=-2FR'],
-    // This one will fail.
-    // The text date should be treated as a floating one, but toString
-    // always returns UTC dates.
-    // ['Every week until January 1, 2007', 'FREQ=WEEKLY;UNTIL=20070101T000000Z'],
-    ['Every week for 20 times', 'FREQ=WEEKLY;COUNT=20']
-  ]
-
-  it('fromText()', function () {
-    texts.forEach(function (item) {
-      var text = item[0]
-      var string = item[1]
-      assert.strictEqual(RRule.fromText(text).toString(), string, text + ' => ' + string)
-    })
+  it('rrulestr https://github.com/jkbrzt/rrule/pull/164', function () {
+    const s1 = 'RRULE:FREQ=WEEKLY;WKST=WE'
+    const s2 = rrulestr(s1).toString()
+    expect(s1).equals(s2, s1 + ' => ' + s2)
+  })
+  
+  it('rrulestr itteration not infinite when interval 0', function () {
+    ['FREQ=YEARLY;INTERVAL=0;BYSETPOS=1;BYDAY=MO',
+    'FREQ=MONTHLY;INTERVAL=0;BYSETPOS=1;BYDAY=MO',
+    'FREQ=DAILY;INTERVAL=0;BYSETPOS=1;BYDAY=MO',
+    'FREQ=HOURLY;INTERVAL=0;BYSETPOS=1;BYDAY=MO',
+    'FREQ=MINUTELY;INTERVAL=0;BYSETPOS=1;BYDAY=MO',
+    'FREQ=SECONDLY;INTERVAL=0;BYSETPOS=1;BYDAY=MO']
+    .map((s) => expect(rrulestr(s).count()).to.equal(0))
   })
 
-  it('toText()', function () {
-    texts.forEach(function (item) {
-      var text = item[0]
-      var string = item[1]
-      assert.strictEqual(RRule.fromString(string).toText().toLowerCase(), text.toLowerCase(),
-        string + ' => ' + text)
-    })
-  })
+  it('does not mutate the passed-in options object', function () {
+    const options = {
+      freq: RRule.MONTHLY,
+      dtstart: new Date(2013, 0, 1),
+      count: 3,
+      bymonthday: [28]
+    }
+    const rule = new RRule(options)
 
-  it('fromString()', function () {
-    var strings = [
-      ['FREQ=WEEKLY;UNTIL=20100101T000000Z', 'FREQ=WEEKLY;UNTIL=20100101T000000Z'],
-
-      // Parse also `date` but return `date-time`
-      ['FREQ=WEEKLY;UNTIL=20100101', 'FREQ=WEEKLY;UNTIL=20100101T000000Z']
-    ]
-    strings.forEach(function (item) {
-      var s = item[0]
-      var s2 = item[1]
-      assert.strictEqual(RRule.fromString(s).toString(), s2, s + ' => ' + s2)
+    expect(options).deep.equals({
+      freq: RRule.MONTHLY,
+      dtstart: new Date(2013, 0, 1),
+      count: 3,
+      bymonthday: [28]
     })
+    expect(rule.origOptions).deep.equals(options)
   })
 
   testRecurring('missing Feb 28 https://github.com/jakubroztocil/rrule/issues/21',
     new RRule({
       freq: RRule.MONTHLY,
-      dtstart: new Date(2013, 0, 1),
+      dtstart: new Date(Date.UTC(2013, 0, 1)),
       count: 3,
       bymonthday: [28]
     }),
     [
-      new Date(2013, 0, 28),
-      new Date(2013, 1, 28),
-      new Date(2013, 2, 28)
+      new Date(Date.UTC(2013, 0, 28)),
+      new Date(Date.UTC(2013, 1, 28)),
+      new Date(Date.UTC(2013, 2, 28))
     ]
   )
 
@@ -290,13 +264,13 @@ describe('RRule', function () {
   testRecurring('testYearlyByNWeekDayLarge',
     new RRule({freq: RRule.YEARLY,
       count: 3,
-      byweekday: [RRule.TU.nth(3), RRule.TH.nth(-3)],
+      byweekday: [RRule.TU.nth(13), RRule.TH.nth(-13)],
       dtstart: parse('19970902T090000')
     }),
     [
-      datetime(1997, 12, 11, 9, 0),
-      datetime(1998, 1, 20, 9, 0),
-      datetime(1998, 12, 17, 9, 0)
+      datetime(1997, 10, 2, 9, 0),
+      datetime(1998, 3, 31, 9, 0),
+      datetime(1998, 10, 8, 9, 0)
     ]
   )
 
@@ -648,6 +622,34 @@ describe('RRule', function () {
       datetime(1997, 11, 15, 18, 0),
       datetime(1998, 2, 15, 6, 0),
       datetime(1998, 11, 15, 18, 0)
+    ]
+  )
+
+  testRecurring('testYearlyBetweenInc',
+    {
+      rrule: new RRule({
+        freq: RRule.YEARLY,
+        dtstart: parse('20150101T000000')
+      }),
+      method: 'between',
+      args: [parse('20160101T000000'), parse('20160101T000000'), true]
+    },
+    [
+      datetime(2016, 1, 1)
+    ]
+  )
+
+  testRecurring('testYearlyBetweenIncLargeSpan',
+    {
+      rrule: new RRule({
+        freq: RRule.YEARLY,
+        dtstart: parse('19200101T000000') // Error because date lower than dateutil.ORDINAL_BASE
+      }),
+      method: 'between',
+      args: [parse('20160101T000000'), parse('20160101T000000'), true]
+    },
+    [
+      datetime(2016, 1, 1)
     ]
   )
 
@@ -3480,20 +3482,254 @@ describe('RRule', function () {
   )
 
   it('testAfterBefore', function () {
-    'YEARLY,MONTHLY,DAILY,HOURLY,MINUTELY,SECONDLY'.split(',').forEach(function (freq_str) {
-      var date = new Date(1356991200001)
-      var rr = new RRule({
-        freq: RRule[freq_str],
+    'YEARLY,MONTHLY,DAILY,HOURLY,MINUTELY,SECONDLY'.split(',').forEach(function (freqStr: keyof typeof Frequency) {
+      const date = new Date(1356991200001)
+      const rr = new RRule({
+        freq: RRule[freqStr],
         dtstart: date
       })
 
-      assert.strictEqual(date.getTime(), rr.options.dtstart.getTime(),
+      expect(date.getTime()).equals(rr.options.dtstart.getTime(),
         'the supplied dtstart differs from RRule.options.dtstart')
-      var res = rr.before(rr.after(rr.options.dtstart))
+      let res: Date = rr.before(rr.after(rr.options.dtstart))
 
-      if (res != null) res = res.getTime()
-      assert.strictEqual(res, rr.options.dtstart.getTime(),
+      let resTimestamp: number
+      if (res != null) resTimestamp = res.getTime()
+      expect(resTimestamp).equals(rr.options.dtstart.getTime(),
         'after dtstart , followed by before does not return dtstart')
     })
+  })
+
+  it('testConvertAndBack', function () {
+    [6, RRule.SU].forEach(function (wkst) {
+      const rr = new RRule({
+        dtstart: new Date(Date.UTC(2017, 9, 17, 0, 30, 0, 0)),
+        until: new Date(Date.UTC(2017, 11, 22, 1, 30, 0, 0)),
+        freq: RRule.MONTHLY,
+        interval: 1,
+        bysetpos: 17,
+        byweekday: [RRule.SU, RRule.MO, RRule.TU, RRule.WE, RRule.TH, RRule.FR, RRule.SA],
+        wkst: wkst,
+        byhour: 11,
+        byminute: 0,
+        bysecond: 0
+      })
+
+      const rrstr = rr.toString()
+      expect(rrstr).equals('DTSTART:20171017T003000Z\nRRULE:UNTIL=20171222T013000Z;FREQ=MONTHLY;INTERVAL=1;BYSETPOS=17;BYDAY=SU,MO,TU,WE,TH,FR,SA;WKST=SU;BYHOUR=11;BYMINUTE=0;BYSECOND=0')
+      const newrr = RRule.fromString(rrstr)
+      expect(rrstr).equals(newrr.toString())
+    })
+  })
+
+  it('testByHourValues', function () {
+    [
+      ['DTSTART:20171101T010000Z\nRRULE:UNTIL=20171214T013000Z;FREQ=DAILY;INTERVAL=2;WKST=MO;BYHOUR=11,12;BYMINUTE=30;BYSECOND=0', 'every 2 days at 11 and 12 until December 13, 2017'],
+      ['DTSTART:20171101T010000Z\nRRULE:UNTIL=20171214T013000Z;FREQ=DAILY;INTERVAL=2;WKST=MO;BYHOUR=11;BYMINUTE=30;BYSECOND=0', 'every 2 days at 11 until December 13, 2017']
+    ].forEach(function (pair) {
+      const rule = pair[0]
+      const rr = RRule.fromString(rule)
+      // tslint:disable-next-line:no-unused-expression
+      expect(rr.toText()).to.be.ok
+      // assert.equal(rr.toText(), pair[1]) -- can't test this because it reports in local time which varies by machine
+    })
+  })
+
+  it('calculates daily recurrences correctly across DST boundaries', () => {
+    const rrule = RRule.fromString('DTSTART=20181101T110000Z;UNTIL=20181106T110000Z;FREQ=DAILY')
+    expect(rrule.all()).to.deep.equal([
+      new Date('2018-11-01T11:00:00.000Z'),
+      new Date('2018-11-02T11:00:00.000Z'),
+      new Date('2018-11-03T11:00:00.000Z'),
+      new Date('2018-11-04T11:00:00.000Z'),
+      new Date('2018-11-05T11:00:00.000Z'),
+      new Date('2018-11-06T11:00:00.000Z')
+    ])
+  })
+
+  it('calculates weekly recurrences correctly across DST boundaries', () => {
+    const rrule = RRule.fromString('DTSTART=20181031T180000Z\nRRULE:FREQ=WEEKLY;UNTIL=20181115T050000Z')
+    expect(rrule.all()).to.deep.equal([
+      new Date('2018-10-31T18:00:00.000Z'),
+      new Date('2018-11-07T18:00:00.000Z'),
+      new Date('2018-11-14T18:00:00.000Z')
+    ])
+  })
+
+  it('calculates byweekday recurrences correctly across DST boundaries', () => {
+    let rule = new RRule({
+      freq: RRule.WEEKLY,
+      dtstart: new Date(Date.UTC(2018, 9, 0, 0, 0, 0)),
+      interval: 1,
+      byweekday: [RRule.SU, RRule.WE],
+      until: new Date(Date.UTC(2018, 9, 9, 0, 0, 0))
+    })
+
+    expect(rule.all()).to.deep.equal([
+      new Date('2018-09-30T00:00:00.000Z'),
+      new Date('2018-10-03T00:00:00.000Z'),
+      new Date('2018-10-07T00:00:00.000Z')
+    ])
+  })
+
+  it('generates weekly events (#247)', () => {
+    const startEvent = 1533895200000
+    const endSearch = 1543618799999
+
+    const rrule = new RRule({
+      freq: RRule.WEEKLY,
+      interval: 1,
+      dtstart: new Date(startEvent),
+      until: new Date(endSearch)
+    })
+
+    expect(rrule.all()).to.deep.equal([
+      new Date('2018-08-10T10:00:00.000Z'),
+      new Date('2018-08-17T10:00:00.000Z'),
+      new Date('2018-08-24T10:00:00.000Z'),
+      new Date('2018-08-31T10:00:00.000Z'),
+      new Date('2018-09-07T10:00:00.000Z'),
+      new Date('2018-09-14T10:00:00.000Z'),
+      new Date('2018-09-21T10:00:00.000Z'),
+      new Date('2018-09-28T10:00:00.000Z'),
+      new Date('2018-10-05T10:00:00.000Z'),
+      new Date('2018-10-12T10:00:00.000Z'),
+      new Date('2018-10-19T10:00:00.000Z'),
+      new Date('2018-10-26T10:00:00.000Z'),
+      new Date('2018-11-02T10:00:00.000Z'),
+      new Date('2018-11-09T10:00:00.000Z'),
+      new Date('2018-11-16T10:00:00.000Z'),
+      new Date('2018-11-23T10:00:00.000Z'),
+      new Date('2018-11-30T10:00:00.000Z')
+    ])
+  })
+
+  it('generates monthly (#233)', () => {
+    const start = new Date(Date.parse('Mon Aug 06 2018 10:30:00 GMT+0530'))
+    const end = new Date(Date.parse('Mon Oct 08 2018 11:00:00 GMT+0530'))
+
+    const rrule = new RRule({
+      freq: RRule.MONTHLY,
+      interval: 1,
+      dtstart: start,
+      until: end
+    })
+
+    expect(rrule.all()).to.deep.equal([
+      new Date('2018-08-06T05:00:00.000Z'),
+      new Date('2018-09-06T05:00:00.000Z'),
+      new Date('2018-10-06T05:00:00.000Z')
+    ])
+  })
+
+  it('generates around dst (#249)', () => {
+    const ruleString = 'DTSTART:20181101T120000Z\nRRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR;COUNT=4;WKST=SU';
+    const rrule = RRule.fromString(ruleString);
+
+    expect(rrule.all()).to.deep.equal([
+      new Date('2018-11-02T12:00:00.000Z'),
+      new Date('2018-11-05T12:00:00.000Z'),
+      new Date('2018-11-07T12:00:00.000Z'),
+      new Date('2018-11-09T12:00:00.000Z')
+    ])
+  })
+
+  it('handles 3-digit years properly (#202)', () => {
+    const rrule = new RRule({
+      count: 1,
+      dtstart: new Date(Date.UTC(990, 0, 1, 0, 0, 0))
+    })
+    const ruleString = rrule.toString()
+    const rrule2 = RRule.fromString(ruleString)
+
+    expect(ruleString).to.equal('DTSTART:09900101T000000Z\nRRULE:COUNT=1')
+    expect(rrule2.count()).to.equal(1)
+    expect(rrule2.all()).to.deep.equal([
+      new Date(Date.UTC(990, 0, 1, 0, 0, 0))
+    ])
+  })
+
+  describe('time zones', () => {
+    const targetZone = 'America/Los_Angeles'
+    const startDate = DateTime.utc(2013, 8, 6, 11, 0, 0)
+    const dtstart = startDate.toJSDate()
+
+    it('generates correct recurrences when recurrence is in dst and current time is standard time', () => {
+      const currentLocalDate = DateTime.local(2013, 2, 6, 11, 0, 0)
+      setMockDate(currentLocalDate.toJSDate())
+
+      const rule = new RRule({
+        dtstart,
+        count: 1,
+        tzid: targetZone
+      })
+      const recurrence = rule.all()[0]
+      const expected = expectedDate(startDate, currentLocalDate, targetZone)
+
+      expect(recurrence)
+        .to.deep.equal(
+          expected 
+        )
+
+      resetMockDate()
+    })
+
+    it('generates correct recurrences when recurrence is in dst and current time is dst', () => {
+      const currentLocalDate = DateTime.local(2013, 8, 6, 11, 0, 0)
+      setMockDate(currentLocalDate.toJSDate())
+
+      const rule = new RRule({
+        dtstart,
+        count: 1,
+        tzid: targetZone
+      })
+      const recurrence = rule.all()[0]
+      const expected = expectedDate(startDate, currentLocalDate, targetZone)
+
+      expect(recurrence)
+        .to.deep.equal(
+          expected 
+        )
+
+      resetMockDate()
+    })
+
+    it('generates correct recurrences when recurrence is in dst and current time is standard time', () => {
+      const currentLocalDate = DateTime.local(2013, 2, 6, 11, 0, 0)
+      setMockDate(currentLocalDate.toJSDate())
+
+      const rule = new RRule({
+        dtstart,
+        count: 1,
+        tzid: targetZone
+      })
+      const recurrence = rule.after(new Date(0))
+      const expected = expectedDate(startDate, currentLocalDate, targetZone)
+
+      expect(recurrence)
+        .to.deep.equal(
+          expected 
+        )
+
+      resetMockDate()
+    })
+  })
+
+  it('throws an error when dtstart is invalid', () => {
+    const invalidDate = new Date(undefined)
+    const validDate = new Date(Date.UTC(2017, 0, 1))
+    expect(() => new RRule({ dtstart: invalidDate })).to.throw('Invalid options: dtstart')
+    expect(() => new RRule({ dtstart: validDate, until: invalidDate })).to.throw('Invalid options: until')
+
+    const rule = new RRule({
+      dtstart: new Date(Date.UTC(2017, 0, 1)),
+      freq: Frequency.DAILY,
+      interval: 1
+    })
+
+    expect(() => rule.after(invalidDate)).to.throw('Invalid date passed in to RRule.after')
+    expect(() => rule.before(invalidDate)).to.throw('Invalid date passed in to RRule.before')
+    expect(() => rule.between(invalidDate, validDate)).to.throw('Invalid date passed in to RRule.between')
+    expect(() => rule.between(validDate, invalidDate)).to.throw('Invalid date passed in to RRule.between')
   })
 })
